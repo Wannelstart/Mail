@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.mail.mapper.ContactMapper">
+
+    <resultMap id="contactVOMap" type="com.mail.dto.response.ContactVO">
+        <id property="id" column="id"/>
+        <result property="contactId" column="contact_id"/>
+        <result property="username" column="username"/>
+        <result property="email" column="email"/>
+        <result property="nickname" column="nickname"/>
+        <result property="groupName" column="group_name"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <select id="findByOwner" resultMap="contactVOMap">
+        SELECT c.id, c.contact_id,
+               COALESCE(u.username, c.nickname) AS username,
+               COALESCE(u.email, c.email) AS email,
+               c.nickname, c.group_name, c.created_at
+        FROM contacts c
+        LEFT JOIN users u ON c.contact_id = u.id
+        WHERE c.owner_id = #{ownerId}
+        <if test="groupName != null and groupName != ''">
+            AND c.group_name = #{groupName}
+        </if>
+        ORDER BY COALESCE(u.username, c.nickname)
+    </select>
+
+    <select id="findById" resultMap="contactVOMap">
+        SELECT c.id, c.contact_id,
+               COALESCE(u.username, c.nickname) AS username,
+               COALESCE(u.email, c.email) AS email,
+               c.nickname, c.group_name, c.created_at
+        FROM contacts c
+        LEFT JOIN users u ON c.contact_id = u.id
+        WHERE c.id = #{id} AND c.owner_id = #{ownerId}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO contacts (owner_id, contact_id, email, nickname, group_name, created_at)
+        VALUES (#{ownerId}, #{contactId}, #{email}, #{nickname}, #{groupName}, NOW())
+    </insert>
+
+    <update id="update">
+        UPDATE contacts
+        SET nickname = #{nickname}, group_name = #{groupName}, email = #{email}
+        WHERE id = #{id} AND owner_id = #{ownerId}
+    </update>
+
+    <delete id="delete">
+        DELETE FROM contacts WHERE id = #{id} AND owner_id = #{ownerId}
+    </delete>
+
+    <select id="search" resultMap="contactVOMap">
+        SELECT c.id, c.contact_id,
+               COALESCE(u.username, c.nickname) AS username,
+               COALESCE(u.email, c.email) AS email,
+               c.nickname, c.group_name, c.created_at
+        FROM contacts c
+        LEFT JOIN users u ON c.contact_id = u.id
+        WHERE c.owner_id = #{ownerId}
+          AND (u.username LIKE CONCAT('%', #{keyword}, '%')
+            OR u.email LIKE CONCAT('%', #{keyword}, '%')
+            OR c.email LIKE CONCAT('%', #{keyword}, '%')
+            OR c.nickname LIKE CONCAT('%', #{keyword}, '%'))
+        ORDER BY COALESCE(u.username, c.nickname)
+        LIMIT 10
+    </select>
+
+</mapper>

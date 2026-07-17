@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.mail.mapper.MailFlagMapper">
+
+    <resultMap id="flagMap" type="com.mail.entity.MailFlag">
+        <id property="id" column="id"/>
+        <result property="mailId" column="mail_id"/>
+        <result property="userId" column="user_id"/>
+      <result property="read" column="is_read"/>
+        <result property="starred" column="is_starred"/>
+        <result property="important" column="is_important"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+    </resultMap>
+
+    <insert id="upsert">
+      INSERT INTO mail_flags (mail_id, user_id, is_read, is_starred, is_important, created_at, updated_at)
+        VALUES (#{mailId}, #{userId},
+           #{read,jdbcType=BOOLEAN},
+             #{starred,jdbcType=BOOLEAN},
+        #{important,jdbcType=BOOLEAN},
+           NOW(), NOW())
+        ON DUPLICATE KEY UPDATE
+        is_read      = VALUES(is_read),
+            is_starred   = VALUES(is_starred),
+            is_important = VALUES(is_important),
+            updated_at   = NOW()
+    </insert>
+
+    <insert id="initFlag">
+        INSERT IGNORE INTO mail_flags (mail_id, user_id, is_read, is_starred, is_important, created_at, updated_at)
+        VALUES (#{mailId}, #{userId}, 0, 0, 0, NOW(), NOW())
+    </insert>
+
+    <select id="findByMailAndUser" resultMap="flagMap">
+        SELECT * FROM mail_flags WHERE mail_id = #{mailId} AND user_id = #{userId}
+    </select>
+
+</mapper>

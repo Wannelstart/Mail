@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.mail.mapper.MailMapper">
+
+    <resultMap id="mailListMap" type="com.mail.dto.response.MailListItem">
+        <id property="id" column="id"/>
+      <result property="subject" column="subject"/>
+        <result property="senderEmail" column="sender_email"/>
+        <result property="senderUsername" column="sender_username"/>
+        <result property="receiverEmail" column="receiver_email"/>
+        <result property="receiverUsername" column="receiver_username"/>
+        <result property="sentAt" column="sent_at"/>
+        <result property="hasAttachments" column="has_attachments"/>
+        <result property="read" column="is_read"/>
+      <result property="starred" column="is_starred"/>
+        <result property="important" column="is_important"/>
+        <result property="remote" column="is_remote"/>
+        <result property="remoteSenderEmail" column="remote_sender_email"/>
+    </resultMap>
+
+    <resultMap id="mailMap" type="com.mail.entity.Mail">
+        <id property="id" column="id"/>
+        <result property="senderId" column="sender_id"/>
+        <result property="receiverId" column="receiver_id"/>
+      <result property="subject" column="subject"/>
+        <result property="content" column="content"/>
+        <result property="status" column="status"/>
+        <result property="senderDeleted" column="sender_deleted"/>
+        <result property="receiverDeleted" column="receiver_deleted"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="sentAt" column="sent_at"/>
+        <result property="hasAttachments" column="has_attachments"/>
+        <result property="remote" column="is_remote"/>
+        <result property="senderServer" column="sender_server"/>
+        <result property="remoteSenderEmail" column="remote_sender_email"/>
+    </resultMap>
+
+    <!-- 收件箱 -->
+    <select id="findInbox" resultMap="mailListMap">
+        SELECT m.id, m.subject, m.sent_at, m.has_attachments,
+               m.is_remote, m.remote_sender_email,
+            s.email AS sender_email, s.username AS sender_username,
+               r.email AS receiver_email, r.username AS receiver_username,
+               COALESCE(f.is_read, 0)      AS is_read,
+         COALESCE(f.is_starred, 0)   AS is_starred,
+               COALESCE(f.is_important, 0) AS is_important
+        FROM mails m
+        LEFT JOIN users s ON m.sender_id = s.id
+        LEFT JOIN users r ON m.receiver_id = r.id
+        LEFT JOIN mail_flags f ON f.mail_id = m.id AND f.user_id = #{userId}
+        WHERE m.receiver_id = #{userId}
+     AND m.receiver_deleted = 0
+          AND m.status = 1
+        ORDER BY COALESCE(f.is_important, 0) DESC, m.sent_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countInbox" resultType="long">
+        SELECT COUNT(*) FROM mails
+        WHERE receiver_id = #{userId} AND receiver_deleted = 0 AND status = 1
+    </select>
+    <!-- 发件箱 -->
+    <select id="findSent" resultMap="mailListMap">
+        SELECT m.id, m.subject, m.sent_at, m.has_attachments,
+               m.is_remote, m.remote_sender_email,
+            s.email AS sender_email, s.username AS sender_username,
+               COALESCE(r.email, m.remote_sender_email) AS receiver_email,
+               r.username AS receiver_username,
+               COALESCE(f.is_read, 0)      AS is_read,
+               COALESCE(f.is_starred, 0)   AS is_starred,
+               COALESCE(f.is_important, 0) AS is_important
+        FROM mails m
+        LEFT JOIN users s ON m.sender_id = s.id
+      LEFT JOIN users r ON m.receiver_id = r.id
+        LEFT JOIN mail_flags f ON f.mail_id = m.id AND f.user_id = #{userId}
+        WHERE m.sender_id = #{userId}
+          AND m.sender_deleted = 0
+    AND m.status = 1
+        ORDER BY COALESCE(f.is_important, 0) DESC, m.sent_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countSent" resultType="long">
+        SELECT COUNT(*) FROM mails
+        WHERE sender_id = #{userId} AND sender_deleted = 0 AND status = 1
+    </select>
+
+    <!-- 草稿箱 -->
+    <select id="findDrafts" resultMap="mailListMap">
+        SELECT m.id, m.subject, m.created_at AS sent_at, m.has_attachments,
+               m.is_remote, m.remote_sender_email,
+               s.email AS sender_email, s.username AS sender_username,
+               r.email AS receiver_email, r.username AS receiver_username,
+               0 AS is_read, 0 AS is_starred, 0 AS is_important
+        FROM mails m
+        LEFT JOIN users s ON m.sender_id = s.id
+        LEFT JOIN users r ON m.receiver_id = r.id
+        WHERE m.sender_id = #{userId}
+          AND m.sender_deleted = 0
+          AND m.status = 0
+        ORDER BY m.created_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countDrafts" resultType="long">
+        SELECT COUNT(*) FROM mails
+        WHERE sender_id = #{userId} AND sender_deleted = 0 AND status = 0
+    </select>
+
+    <!-- 详情 -->
+    <select id="findById" resultMap="mailMap">
+        SELECT * FROM mails WHERE id = #{id}
+    </select>
+
+    <!-- 插入 -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO mails (sender_id, receiver_id, subject, content, status,
+            sender_deleted, receiver_deleted, created_at, sent_at,
+               has_attachments, is_remote, sender_server, remote_sender_email)
+        VALUES (#{senderId}, #{receiverId}, #{subject}, #{content}, #{status},
+        0, 0, NOW(), #{sentAt},
+             0, #{remote}, #{senderServer}, #{remoteSenderEmail})
+    </insert>
+    <!-- 更新草稿 -->
+    <update id="updateDraft">
+        UPDATE mails
+        SET subject = #{subject}, content = #{content},
+          receiver_id = #{receiverId}
+        WHERE id = #{id} AND status = 0
+    </update>
+
+    <!-- 草稿升级为已发送 -->
+    <update id="updateToSent">
+        UPDATE mails SET status = 1, sent_at = #{sentAt} WHERE id = #{id}
+    </update>
+
+    <!-- 软删除 -->
+    <update id="softDeleteBySender">
+        UPDATE mails SET sender_deleted = 1 WHERE id = #{id} AND sender_id = #{userId}
+    </update>
+
+    <update id="softDeleteByReceiver">
+        UPDATE mails SET receiver_deleted = 1 WHERE id = #{id} AND receiver_id = #{userId}
+    </update>
+
+    <!-- 更新附件标记 -->
+    <update id="updateHasAttachments">
+    UPDATE mails SET has_attachments = 1 WHERE id = #{id}
+    </update>
+
+    <!-- 清除附件标记 -->
+    <update id="clearHasAttachments">
+    UPDATE mails SET has_attachments = 0 WHERE id = #{id}
+    </update>
+
+    <!-- 撤回邮件到草稿箱 -->
+    <update id="recallToDraft">
+    UPDATE mails
+    SET status = 0, sent_at = NULL, sender_deleted = 0, receiver_deleted = 1
+    WHERE id = #{id} AND sender_id = #{userId}
+    </update>
+
+    <!-- 搜索（动态 SQL） -->
+    <select id="search" resultMap="mailListMap">
+        SELECT m.id, m.subject, m.sent_at, m.has_attachments,
+             m.is_remote, m.remote_sender_email,
+               s.email AS sender_email, s.username AS sender_username,
+               r.email AS receiver_email, r.username AS receiver_username,
+           COALESCE(f.is_read, 0)      AS is_read,
+          COALESCE(f.is_starred, 0)   AS is_starred,
+       COALESCE(f.is_important, 0) AS is_important
+      FROM mails m
+        LEFT JOIN users s ON m.sender_id = s.id
+        LEFT JOIN users r ON m.receiver_id = r.id
+        LEFT JOIN mail_flags f ON f.mail_id = m.id AND f.user_id = #{userId}
+        <where>
+         <choose>
+                <when test="box == 'inbox'">
+               m.receiver_id = #{userId} AND m.receiver_deleted = 0 AND m.status = 1
+                </when>
+          <when test="box == 'sent'">
+           m.sender_id = #{userId} AND m.sender_deleted = 0 AND m.status = 1
+         </when>
+          <when test="box == 'drafts'">
+                m.sender_id = #{userId} AND m.sender_deleted = 0 AND m.status = 0
+                </when>
+                <otherwise>
+          (
+                   (m.receiver_id = #{userId} AND m.receiver_deleted = 0 AND m.status = 1)
+              OR
+                      (m.sender_id = #{userId} AND m.sender_deleted = 0 AND m.status = 1)
+                 )
+              </otherwise>
+         </choose>
+      <if test="searchIn == 'subject'">
+                AND m.subject LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+            <if test="searchIn == 'content'">
+         AND m.content LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+            <if test="searchIn == 'all'">
+                AND (m.subject LIKE CONCAT('%', #{keyword}, '%')
+                     OR m.content LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+        </where>
+        ORDER BY COALESCE(f.is_important, 0) DESC, m.sent_at DESC
+        LIMIT #{size} OFFSET #{offset}
+    </select>
+
+    <select id="countSearch" resultType="long">
+        SELECT COUNT(*)
+        FROM mails m
+        LEFT JOIN users s ON m.sender_id = s.id
+        <where>
+       <choose>
+           <when test="box == 'inbox'">
+             m.receiver_id = #{userId} AND m.receiver_deleted = 0 AND m.status = 1
+          </when>
+                <when test="box == 'sent'">
+         m.sender_id = #{userId} AND m.sender_deleted = 0 AND m.status = 1
+                </when>
+             <when test="box == 'drafts'">
+         m.sender_id = #{userId} AND m.sender_deleted = 0 AND m.status = 0
+                </when>
+             <otherwise>
+             (
+                  (m.receiver_id = #{userId} AND m.receiver_deleted = 0 AND m.status = 1)
+                 OR
+                    (m.sender_id = #{userId} AND m.sender_deleted = 0 AND m.status = 1)
+                 )
+                </otherwise>
+            </choose>
+            <if test="searchIn == 'subject'">
+                AND m.subject LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+            <if test="searchIn == 'content'">
+                AND m.content LIKE CONCAT('%', #{keyword}, '%')
+            </if>
+            <if test="searchIn == 'all'">
+                AND (m.subject LIKE CONCAT('%', #{keyword}, '%')
+                     OR m.content LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+        </where>
+    </select>
+
+</mapper>
