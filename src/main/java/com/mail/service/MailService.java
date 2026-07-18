@@ -166,7 +166,9 @@ public class MailService {
 
             java.util.concurrent.ScheduledFuture<?> future = scheduler.schedule(() -> {
                 try {
-                    externalMailService.sendExternalMail(qqEmail, qqAuthCode, toEmail, finalSubject, finalContent);
+                    List<Attachment> attachments = attachmentMapper.findByMailId(mailId);
+                    externalMailService.sendExternalMail(
+                            qqEmail, qqAuthCode, toEmail, finalSubject, finalContent, attachments);
                     pendingSends.remove(mailId);
                     log.info("延迟发送完成: mailId={}", mailId);
                 } catch (Exception e) {
