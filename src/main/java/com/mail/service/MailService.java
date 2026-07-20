@@ -235,9 +235,6 @@ public class MailService {
                     externalMailService.sendExternalMail(qqEmail, qqAuthCode, toEmail, finalSubject, finalContent, attachments);
                     mailMapper.updateStatus(mailId, MailStatus.SENT.getCode());
                     mailMapper.updateSentAt(mailId, LocalDateTime.now());
-
-                    externalMailService.sendExternalMail(
-                            qqEmail, qqAuthCode, toEmail, finalSubject, finalContent, attachments);
                     pendingSends.remove(mailId);
                     log.info("延迟发送完成: mailId={}", mailId);
                 } catch (Exception e) {
