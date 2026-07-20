@@ -56,6 +56,7 @@ public class ContactService {
         contact.setOwnerId(ownerId);
         contact.setNickname(req.getNickname());
         contact.setGroupName(req.getGroupName());
+        contact.setEmail(req.getEmail());
         contactMapper.update(contact);
         return contactMapper.findById(id, ownerId);
     }
