@@ -41,6 +41,15 @@ public class FileUtil {
         return path.toString();
     }
 
+    public String saveBytes(byte[] data, String fileName) throws IOException {
+        String dir = buildDir();
+        String filename = UUID.randomUUID() + "_" + fileName;
+        Path path = Paths.get(dir, filename).toAbsolutePath();
+        Files.createDirectories(path.getParent());
+        Files.write(path, data);
+        return path.toString();
+    }
+
     public byte[] readFile(String filePath) throws IOException {
         return Files.readAllBytes(Paths.get(filePath));
     }

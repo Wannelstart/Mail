@@ -42,6 +42,46 @@ public class MailService {
     @org.springframework.beans.factory.annotation.Value("${app.mail-domain}")
     private String mailDomain;
 
+    @jakarta.annotation.PostConstruct
+    public void recoverPendingMails() {
+        List<Mail> pendingMails = mailMapper.findPendingExternalMails();
+        if (pendingMails.isEmpty()) return;
+        log.info("恢复 {} 封待发送的外部邮件", pendingMails.size());
+        for (Mail mail : pendingMails) {
+            try {
+                User sender = userMapper.findById(mail.getSenderId());
+                if (sender == null || sender.getQqEmail() == null) {
+                    mailMapper.updateStatus(mail.getId(), MailStatus.FAILED.getCode());
+                    continue;
+                }
+                String qqEmail = sender.getQqEmail();
+                String qqAuthCode = aesEncryptor.decrypt(sender.getQqAuthCode());
+                String toEmail = mail.getRemoteSenderEmail();
+                Long mailId = mail.getId();
+                String subject = mail.getSubject();
+                String content = mail.getContent();
+
+                java.util.concurrent.ScheduledFuture<?> future = scheduler.schedule(() -> {
+                    try {
+                        List<com.mail.entity.Attachment> attachments = attachmentMapper.findByMailId(mailId);
+                        externalMailService.sendExternalMail(qqEmail, qqAuthCode, toEmail, subject, content, attachments);
+                        mailMapper.updateStatus(mailId, MailStatus.SENT.getCode());
+                        mailMapper.updateSentAt(mailId, LocalDateTime.now());
+                        pendingSends.remove(mailId);
+                    } catch (Exception e) {
+                        log.error("恢复发送失败: mailId={}", mailId, e);
+                        mailMapper.updateStatus(mailId, MailStatus.FAILED.getCode());
+                        pendingSends.remove(mailId);
+                    }
+                }, 1, java.util.concurrent.TimeUnit.MINUTES);
+                pendingSends.put(mailId, future);
+            } catch (Exception e) {
+                log.error("恢复邮件失败: mailId={}", mail.getId(), e);
+                mailMapper.updateStatus(mail.getId(), MailStatus.FAILED.getCode());
+            }
+        }
+    }
+
     public PageResult<MailListItem> getInbox(Long userId, int page, int size) {
         int offset = (page - 1) * size;
         List<MailListItem> list = mailMapper.findInbox(userId, offset, size);
@@ -70,15 +110,28 @@ public class MailService {
         if (!userId.equals(mail.getSenderId()) && !userId.equals(mail.getReceiverId())) {
             throw new SecurityException("无权访问");
         }
-        // 自动标记已读
+        // Check soft-delete status
+        if (userId.equals(mail.getSenderId()) && Boolean.TRUE.equals(mail.getSenderDeleted())) {
+            throw new IllegalArgumentException("邮件已删除");
+        }
+        if (userId.equals(mail.getReceiverId()) && Boolean.TRUE.equals(mail.getReceiverDeleted())) {
+            throw new IllegalArgumentException("邮件已删除");
+        }
+        // Fix #10: Only update read status, preserve existing starred/important
         if (userId.equals(mail.getReceiverId())) {
-            com.mail.entity.MailFlag flag = new com.mail.entity.MailFlag();
-            flag.setMailId(mailId);
-            flag.setUserId(userId);
-            flag.setRead(true);
-            flag.setStarred(false);
-            flag.setImportant(false);
-            mailFlagMapper.upsert(flag);
+            com.mail.entity.MailFlag existingFlag = mailFlagMapper.findByMailAndUser(mailId, userId);
+            if (existingFlag != null) {
+                existingFlag.setRead(true);
+                mailFlagMapper.upsert(existingFlag);
+            } else {
+                com.mail.entity.MailFlag flag = new com.mail.entity.MailFlag();
+                flag.setMailId(mailId);
+                flag.setUserId(userId);
+                flag.setRead(true);
+                flag.setStarred(false);
+                flag.setImportant(false);
+                mailFlagMapper.upsert(flag);
+            }
         }
         MailDetail detail = new MailDetail();
         detail.setId(mail.getId());
@@ -122,18 +175,26 @@ public class MailService {
     @Transactional
     public Long sendMail(Long senderId, SendMailRequest req) {
         log.info("发送邮件: senderId={}, receiverEmail={}, isDraft={}", senderId, req.getReceiverEmail(), req.isDraft());
-        User receiver = userMapper.findByEmail(req.getReceiverEmail());
 
+        String receiverEmail = req.getReceiverEmail();
+        boolean hasReceiver = receiverEmail != null && !receiverEmail.isBlank();
+
+        User receiver = hasReceiver ? userMapper.findByEmail(receiverEmail) : null;
         boolean isExternal = (receiver == null);
 
-        // 如果是本站域名但用户不存在，报错
-        if (isExternal && req.getReceiverEmail().endsWith("@" + mailDomain)) {
+        // If draft with no receiver, allow it
+        if (req.isDraft() && !hasReceiver) {
+            isExternal = false;
+        }
+
+        // If not draft and is external, check domain
+        if (!req.isDraft() && isExternal && receiverEmail != null && receiverEmail.endsWith("@" + mailDomain)) {
             throw new IllegalArgumentException("收件人不存在");
         }
 
         Mail mail = new Mail();
         mail.setSenderId(senderId);
-        mail.setReceiverId(isExternal ? null : receiver.getId());
+        mail.setReceiverId(isExternal ? null : receiver != null ? receiver.getId() : null);
         String subject = req.getSubject();
         String content = req.getContent();
         if (!req.isDraft()) {
@@ -143,10 +204,13 @@ public class MailService {
         mail.setSubject(subject);
         mail.setContent(content);
         mail.setRemote(isExternal);
-        mail.setRemoteSenderEmail(isExternal ? req.getReceiverEmail() : null);
+        mail.setRemoteSenderEmail(isExternal && hasReceiver ? receiverEmail : null);
 
         if (req.isDraft()) {
             mail.setStatus(MailStatus.DRAFT.getCode());
+        } else if (isExternal) {
+            // Fix #4: Set PENDING status for external mail, only mark SENT after SMTP success
+            mail.setStatus(MailStatus.PENDING.getCode());
         } else {
             mail.setStatus(MailStatus.SENT.getCode());
             mail.setSentAt(LocalDateTime.now());
@@ -166,11 +230,16 @@ public class MailService {
 
             java.util.concurrent.ScheduledFuture<?> future = scheduler.schedule(() -> {
                 try {
-                    externalMailService.sendExternalMail(qqEmail, qqAuthCode, toEmail, finalSubject, finalContent);
+                    // Fix #5/#18: Load persisted attachments and pass to SMTP
+                    List<com.mail.entity.Attachment> attachments = attachmentMapper.findByMailId(mailId);
+                    externalMailService.sendExternalMail(qqEmail, qqAuthCode, toEmail, finalSubject, finalContent, attachments);
+                    mailMapper.updateStatus(mailId, MailStatus.SENT.getCode());
+                    mailMapper.updateSentAt(mailId, LocalDateTime.now());
                     pendingSends.remove(mailId);
                     log.info("延迟发送完成: mailId={}", mailId);
                 } catch (Exception e) {
                     log.error("延迟发送失败: mailId={}", mailId, e);
+                    mailMapper.updateStatus(mailId, MailStatus.FAILED.getCode());
                     pendingSends.remove(mailId);
                 }
             }, 2, java.util.concurrent.TimeUnit.MINUTES);
@@ -189,22 +258,26 @@ public class MailService {
         if (!userId.equals(mail.getSenderId())) throw new SecurityException("无权操作");
         if (mail.getStatus() != MailStatus.DRAFT.getCode()) throw new IllegalArgumentException("只能编辑草稿");
 
+        String receiverEmail = req.getReceiverEmail();
+        boolean hasReceiver = receiverEmail != null && !receiverEmail.isBlank();
+        User receiver = hasReceiver ? userMapper.findByEmail(receiverEmail) : null;
+        boolean isExternal = hasReceiver && (receiver == null);
+
+        if (isExternal && receiverEmail.endsWith("@" + mailDomain)) {
+            throw new IllegalArgumentException("收件人不存在");
+        }
+
+        mail.setReceiverId(!hasReceiver ? null : (isExternal ? null : receiver.getId()));
+        mail.setSubject(req.getSubject());
+        mail.setContent(req.getContent());
+        mail.setRemote(isExternal);
+        mail.setRemoteSenderEmail(isExternal ? receiverEmail : null);
+        mailMapper.updateDraft(mail);
+
         // If changing from draft to sent
         if (!req.isDraft()) {
-            User receiver = userMapper.findByEmail(req.getReceiverEmail());
-            if (receiver == null) throw new IllegalArgumentException("收件人不存在");
-            mail.setReceiverId(receiver.getId());
-            mail.setSubject(req.getSubject());
-            mail.setContent(req.getContent());
-            mailMapper.updateDraft(mail);
+            if (!hasReceiver) throw new IllegalArgumentException("收件人不能为空");
             mailMapper.updateToSent(mailId, LocalDateTime.now());
-        } else {
-            User receiver = userMapper.findByEmail(req.getReceiverEmail());
-            if (receiver == null) throw new IllegalArgumentException("收件人不存在");
-            mail.setReceiverId(receiver.getId());
-            mail.setSubject(req.getSubject());
-            mail.setContent(req.getContent());
-            mailMapper.updateDraft(mail);
         }
     }
 
@@ -218,6 +291,10 @@ public class MailService {
         // Verify source mail exists
         Mail source = mailMapper.findById(sourceMailId);
         if (source == null) throw new IllegalArgumentException("源邮件不存在");
+        // Fix #11: Verify user has access to source mail
+        if (!userId.equals(source.getSenderId()) && !userId.equals(source.getReceiverId())) {
+            throw new SecurityException("无权访问源邮件");
+        }
 
         if (attachmentIds != null && !attachmentIds.isEmpty()) {
             attachmentMapper.copySelected(sourceMailId, targetMailId, attachmentIds);
@@ -252,19 +329,27 @@ public class MailService {
 
         // 检查是否在2分钟内
         LocalDateTime sentAt = mail.getSentAt();
-        if (sentAt == null) {
+        // Allow recall for PENDING mails (sentAt is null but mail was "sent")
+        if (mail.getStatus() == MailStatus.PENDING.getCode()) {
+            // PENDING external mail, allow recall
+        } else if (sentAt == null) {
             throw new IllegalArgumentException("该邮件尚未发送");
         }
 
-        LocalDateTime now = LocalDateTime.now();
-        long minutesDiff = java.time.Duration.between(sentAt, now).toMinutes();
-        if (minutesDiff > 2) {
-            throw new IllegalArgumentException("超过撤回时限（只能撤回2分钟内发送的邮件）");
+        if (mail.getStatus() != MailStatus.PENDING.getCode()) {
+            LocalDateTime now = LocalDateTime.now();
+            long secondsDiff = java.time.Duration.between(sentAt, now).getSeconds();
+            if (secondsDiff > 120) {
+                throw new IllegalArgumentException("超过撤回时限（只能撤回2分钟内发送的邮件）");
+            }
         }
 
         // 取消延迟发送任务（如果是外部邮件）
         java.util.concurrent.ScheduledFuture<?> future = pendingSends.remove(mailId);
         if (future != null) {
+            if (future.isDone()) {
+                throw new IllegalArgumentException("邮件已发送，无法撤回");
+            }
             future.cancel(false);
             log.info("已取消延迟发送任务: mailId={}", mailId);
         }

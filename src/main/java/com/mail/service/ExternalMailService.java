@@ -1,23 +1,32 @@
 package com.mail.service;
 
+import com.mail.entity.Attachment;
+import com.mail.util.FileUtil;
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
+import java.io.File;
+import java.util.List;
 import java.util.Properties;
 
 @Slf4j
 @Service
+@RequiredArgsConstructor
 public class ExternalMailService {
 
+    private final FileUtil fileUtil;
+
     /**
-     * 通过用户绑定的 QQ 邮箱 SMTP 发送外部邮件
+     * 通过用户绑定的 QQ 邮箱 SMTP 发送外部邮件（带附件支持）
      */
-    public void sendExternalMail(String fromEmail, String authCode, String toEmail, String subject, String content) {
+    public void sendExternalMail(String fromEmail, String authCode, String toEmail,
+                                  String subject, String content, List<Attachment> attachments) {
         JavaMailSender sender = createQqMailSender(fromEmail, authCode);
         try {
             MimeMessage message = sender.createMimeMessage();
@@ -26,6 +35,22 @@ public class ExternalMailService {
             helper.setTo(toEmail);
             helper.setSubject(subject);
             helper.setText(content, false);
+
+            // Add attachments
+            if (attachments != null) {
+                for (Attachment att : attachments) {
+                    try {
+                        byte[] data = fileUtil.readFile(att.getFilePath());
+                        String contentType = att.getContentType() != null
+                                ? att.getContentType() : "application/octet-stream";
+                        helper.addAttachment(att.getFileName(),
+                                new org.springframework.core.io.ByteArrayResource(data),
+                                contentType);
+                    } catch (Exception e) {
+                        log.warn("添加附件失败: fileName={}, path={}", att.getFileName(), att.getFilePath(), e);
+                    }
+                }
+            }
 
             sender.send(message);
             log.info("外部邮件发送成功: from={}, to={}, subject={}", fromEmail, toEmail, subject);
