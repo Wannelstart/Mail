@@ -48,7 +48,7 @@ public class AuthService {
         userMapper.insert(user);
         log.info("新用户注册成功: username={}", req.getUsername());
         String token = jwtUtil.generateToken(user.getId());
-        return AuthResponse.of(token, user.getId(), user.getUsername(), user.getEmail());
+        return AuthResponse.of(token, user.getId(), user.getUsername(), user.getEmail(), user.getAvatar(), user.getQqEmail());
     }
 
     public AuthResponse login(LoginRequest req) {
@@ -64,7 +64,7 @@ public class AuthService {
         }
         log.info("用户登录成功: email={}", req.getEmail());
         String token = jwtUtil.generateToken(user.getId());
-        return AuthResponse.of(token, user.getId(), user.getUsername(), user.getEmail());
+        return AuthResponse.of(token, user.getId(), user.getUsername(), user.getEmail(), user.getAvatar(), user.getQqEmail());
     }
 
     public void changePassword(Long userId, ChangePasswordRequest req) {
@@ -93,6 +93,6 @@ public class AuthService {
         User user = userMapper.findById(userId);
         String token = jwtUtil.generateToken(user.getId());
         log.info("用户修改用户名成功: userId={}, newUsername={}", userId, newUsername);
-        return AuthResponse.of(token, user.getId(), user.getUsername(), user.getEmail());
+        return AuthResponse.of(token, user.getId(), user.getUsername(), user.getEmail(), user.getAvatar(), user.getQqEmail());
     }
 }

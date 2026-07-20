@@ -11,6 +11,7 @@
         <result property="salt" column="salt"/>
         <result property="qqEmail" column="qq_email"/>
         <result property="qqAuthCode" column="qq_auth_code"/>
+        <result property="avatar" column="avatar"/>
         <result property="createdAt" column="created_at"/>
     </resultMap>
 
