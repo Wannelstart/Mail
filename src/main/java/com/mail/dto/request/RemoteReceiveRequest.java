@@ -12,6 +12,7 @@ public class RemoteReceiveRequest {
     private String content;
     private String timestamp;
     private String signature;
+    private String nonce;
     private List<RemoteAttachment> attachments;
 
     @Data
@@ -20,5 +21,5 @@ public class RemoteReceiveRequest {
         private String contentType;
         private long fileSize;
         private String base64Data;
-  }
+    }
 }
