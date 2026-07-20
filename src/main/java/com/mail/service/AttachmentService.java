@@ -50,6 +50,13 @@ public class AttachmentService {
         if (!userId.equals(mail.getSenderId()) && !userId.equals(mail.getReceiverId())) {
             throw new SecurityException("无权访问");
         }
+        // Check soft-delete status
+        if (userId.equals(mail.getSenderId()) && Boolean.TRUE.equals(mail.getSenderDeleted())) {
+            throw new IllegalArgumentException("邮件已删除");
+        }
+        if (userId.equals(mail.getReceiverId()) && Boolean.TRUE.equals(mail.getReceiverDeleted())) {
+            throw new IllegalArgumentException("邮件已删除");
+        }
         return fileUtil.readFile(a.getFilePath());
     }
 
