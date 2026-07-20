@@ -41,6 +41,11 @@ public interface MailMapper {
     void clearHasAttachments(@Param("id") Long id);
     void recallToDraft(@Param("id") Long id, @Param("userId") Long userId);
 
+    // 状态更新
+    void updateStatus(@Param("id") Long id, @Param("status") int status);
+    void updateSentAt(@Param("id") Long id, @Param("sentAt") java.time.LocalDateTime sentAt);
+    List<Mail> findPendingExternalMails();
+
     // 搜索
     List<MailListItem> search(@Param("userId") Long userId,
              @Param("keyword") String keyword,

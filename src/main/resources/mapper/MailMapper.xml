@@ -161,6 +161,21 @@
     WHERE id = #{id} AND sender_id = #{userId}
     </update>
 
+    <!-- 更新邮件状态 -->
+    <update id="updateStatus">
+        UPDATE mails SET status = #{status} WHERE id = #{id}
+    </update>
+
+    <!-- 更新发送时间 -->
+    <update id="updateSentAt">
+        UPDATE mails SET sent_at = #{sentAt} WHERE id = #{id}
+    </update>
+
+    <!-- 查找待发送的外部邮件（启动恢复用） -->
+    <select id="findPendingExternalMails" resultMap="mailMap">
+        SELECT * FROM mails WHERE status = 2 AND is_remote = 1 AND sent_at IS NULL
+    </select>
+
     <!-- 搜索（动态 SQL） -->
     <select id="search" resultMap="mailListMap">
         SELECT m.id, m.subject, m.sent_at, m.has_attachments,
@@ -203,6 +218,15 @@
                 AND (m.subject LIKE CONCAT('%', #{keyword}, '%')
                      OR m.content LIKE CONCAT('%', #{keyword}, '%'))
             </if>
+            <if test="searchIn == 'sender'">
+                AND (s.email LIKE CONCAT('%', #{keyword}, '%')
+                     OR s.username LIKE CONCAT('%', #{keyword}, '%')
+                     OR m.remote_sender_email LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="searchIn == 'receiver'">
+                AND (r.email LIKE CONCAT('%', #{keyword}, '%')
+                     OR r.username LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
         </where>
         ORDER BY COALESCE(f.is_important, 0) DESC, m.sent_at DESC
         LIMIT #{size} OFFSET #{offset}
@@ -212,6 +236,7 @@
         SELECT COUNT(*)
         FROM mails m
         LEFT JOIN users s ON m.sender_id = s.id
+        LEFT JOIN users r ON m.receiver_id = r.id
         <where>
        <choose>
            <when test="box == 'inbox'">
@@ -240,6 +265,15 @@
             <if test="searchIn == 'all'">
                 AND (m.subject LIKE CONCAT('%', #{keyword}, '%')
                      OR m.content LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="searchIn == 'sender'">
+                AND (s.email LIKE CONCAT('%', #{keyword}, '%')
+                     OR s.username LIKE CONCAT('%', #{keyword}, '%')
+                     OR m.remote_sender_email LIKE CONCAT('%', #{keyword}, '%'))
+            </if>
+            <if test="searchIn == 'receiver'">
+                AND (r.email LIKE CONCAT('%', #{keyword}, '%')
+                     OR r.username LIKE CONCAT('%', #{keyword}, '%'))
             </if>
         </where>
     </select>
