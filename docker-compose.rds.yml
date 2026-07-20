@@ -12,7 +12,7 @@ services:
       DB_URL: ${DB_URL}
       DB_USER: ${DB_USER}
       DB_PASS: ${DB_PASS}
-      UPLOAD_BASE_DIR: /data/uploads
+      UPLOAD_DIR: /data/uploads
       APP_PUBLIC_SCHEME: ${APP_PUBLIC_SCHEME}
       APP_PUBLIC_HOST: ${APP_PUBLIC_HOST}
       APP_PUBLIC_PORT: ${APP_PUBLIC_PORT}
