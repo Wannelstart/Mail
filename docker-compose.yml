@@ -62,7 +62,7 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: 6379
       REDIS_PASS: ${REDIS_PASS:-}
-      UPLOAD_BASE_DIR: /data/uploads
+      UPLOAD_DIR: /data/uploads
       APP_PUBLIC_SCHEME: ${APP_PUBLIC_SCHEME}
       APP_PUBLIC_HOST: ${APP_PUBLIC_HOST}
       APP_PUBLIC_PORT: ${APP_PUBLIC_PORT}
@@ -83,6 +83,7 @@ services:
       - "80:80"
       - "443:443"
     volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
       - ./deploy/nginx/conf.d/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./deploy/nginx/certbot/www:/var/www/certbot
       - ./deploy/nginx/certbot/conf:/etc/letsencrypt
